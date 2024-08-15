@@ -9,7 +9,50 @@ CREATE TABLE FONAVI_IUD.DHE_T_NUEVOS_HEREDEROS_TMP
     PER_F_NACIMIENTO DATE
 );
 
--- Paso 2: Insertar masivamente
+-- Paso 2: Insertar registro en la tabla
+CREATE OR REPLACE PROCEDURE FONAVI_IUD.SP_DHE_INSERTAR_Y_PROCESAR_HEREDEROS(
+    p_herederos_str IN VARCHAR2
+) AS
+BEGIN
+    -- Paso 1: Truncar la tabla temporal para eliminar todos los registros
+    EXECUTE IMMEDIATE 'TRUNCATE TABLE FONAVI_IUD.DHE_T_NUEVOS_HEREDEROS_TMP';
+
+    -- Paso 2: Insertar los nuevos registros en la tabla temporal
+    FOR rec IN (
+        SELECT REGEXP_SUBSTR(p_herederos_str, '[^|]+', 1, LEVEL) AS heredero_str
+        FROM DUAL
+        CONNECT BY LEVEL <= LENGTH(p_herederos_str) - LENGTH(REPLACE(p_herederos_str, '|', '')) + 1
+        ) LOOP
+            INSERT INTO FONAVI_IUD.DHE_T_NUEVOS_HEREDEROS_TMP (
+                DOC_C_TIPO, DOC_C_NUMERO, PER_D_NOMBRES, PER_D_APELLIDO_PATERNO, PER_D_APELLIDO_MATERNO, PER_F_NACIMIENTO
+            ) VALUES (
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 1),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 2),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 3),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 4),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 5),
+                         TO_DATE(REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 6), 'YYYY-MM-DD')
+                     );
+        END LOOP;
+
+    -- Commit para asegurar que los registros sean insertados
+    COMMIT;
+
+    -- Paso 3: Llamar al procedimiento para comparar e insertar herederos
+    FONAVI_IUD.SP_DHE_INSERT_COMP_HEREDEROS_MASIVO(p_herederos_str);
+
+    -- Mensaje de éxito
+    DBMS_OUTPUT.PUT_LINE('Proceso de inserción y comparación completado exitosamente.');
+
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error: ' || SQLERRM);
+        ROLLBACK;
+END SP_DHE_INSERTAR_Y_PROCESAR_HEREDEROS;
+/
+
+
+-- Paso 3: Insertar masivamente
 CREATE OR REPLACE PROCEDURE FONAVI_IUD.SP_DHE_INSERT_NUEVO_HEREDEROS_MASIVO IS
     CURSOR cur_padron IS
         SELECT * FROM FONAVI_IUD.DHE_T_NUEVOS_HEREDEROS_TMP;

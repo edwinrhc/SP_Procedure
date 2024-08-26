@@ -2,7 +2,8 @@
 
 CREATE OR REPLACE PROCEDURE FONAVI_IUD.SP_RN_ACTUALIZA_FECHA_FALLECIMIENTO(
     p_numero_documento IN VARCHAR2,
-    p_fecha_fallecimiento IN VARCHAR2
+    p_fecha_fallecimiento IN VARCHAR2,
+    p_usuario_sesion IN VARCHAR2
 ) AS
 BEGIN
     -- Establecer formato de fecha para la sesión
@@ -36,7 +37,8 @@ BEGIN
         fecha_modificacion = SYSDATE,
         estado_reniec = 'FALLECIMIENTO',
         fuente_st = 'RENIEC - CONSULTA EN LINEA',
-        usuario_modificacion = 'DBASIFONAVI'
+--         usuario_modificacion = 'DBASIFONAVI'
+        usuario_modificacion = p_usuario_sesion
     WHERE numero_documento = p_numero_documento;
 
     -- Comprobación final (opcional)

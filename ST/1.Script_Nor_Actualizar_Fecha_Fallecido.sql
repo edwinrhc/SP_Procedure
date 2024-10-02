@@ -1,15 +1,17 @@
---1. Procedimiento para Actualizar Fecha de Fallecimiento en FON_RENIEC
+-- DROP PROCEDURE  FONAVI_IUD.SP_RN_ACTUALIZA_FECHA_FALLECIMIENTO;
 
-CREATE OR REPLACE PROCEDURE FONAVI_IUD.SP_RN_ACTUALIZA_FECHA_FALLECIMIENTO(
+CREATE OR REPLACE PROCEDURE FONAVI_IUD.SP_UPDDEATHDT(
     p_numero_documento IN VARCHAR2,
     p_fecha_fallecimiento IN VARCHAR2,
     p_usuario_sesion IN VARCHAR2
 ) AS
 BEGIN
+--     Procedimiento para Actualizar Fecha de Fallecimiento en FON_RENIEC
+
     -- Establecer formato de fecha para la sesión
     EXECUTE IMMEDIATE 'ALTER SESSION SET NLS_DATE_FORMAT = ''DD/MM/YYYY''';
 
-    -- Eliminar la restricción de solo lectura (si existe)
+-- Eliminar la restricción de solo lectura (si existe)
     BEGIN
         EXECUTE IMMEDIATE 'ALTER TABLE FONAVI.FON_RENIEC DROP CONSTRAINT FON_RENIEC_READ_ONLY';
     EXCEPTION
@@ -41,7 +43,7 @@ BEGIN
         usuario_modificacion = p_usuario_sesion
     WHERE numero_documento = p_numero_documento;
 
-    -- Comprobación final (opcional)
+-- Comprobación final (opcional)
     DBMS_OUTPUT.PUT_LINE('Comprobación final:');
     FOR r IN (SELECT tipo_documento, numero_documento, estado_reniec, fecha_defuncion, fecha_modificacion
               FROM FONAVI.FON_RENIEC
@@ -55,19 +57,21 @@ BEGIN
 
     -- Confirmar los cambios
     COMMIT;
-END SP_RN_ACTUALIZA_FECHA_FALLECIMIENTO;
-
+END SP_UPDDEATHDT;
 
 --2. Procedimiento para Insertar en GPET_PERSONA_VALIDA
+ --DROP PROCEDURE FONAVI.SP_GPE_INSERT_PERSONA_VALIDA;
 
-CREATE OR REPLACE PROCEDURE FONAVI.SP_GPE_INSERT_PERSONA_VALIDA(
+CREATE OR REPLACE PROCEDURE FONAVI.SP_INSERTVALIDPERSON(
     p_personas_str IN VARCHAR2
 ) AS
 BEGIN
+    -- Procedimiento para Insertar en GPET_PERSONA_VALIDA
+
     -- Eliminar todos los registros de FONAVI.GPET_PERSONA_VALIDA
     DELETE FROM FONAVI.GPET_PERSONA_VALIDA;
 
-    -- Insertar nuevos registros en FONAVI.GPET_PERSONA_VALIDA
+-- Insertar nuevos registros en FONAVI.GPET_PERSONA_VALIDA
     FOR rec IN (
         SELECT REGEXP_SUBSTR(p_personas_str, '[^|]+', 1, LEVEL) AS persona_str
         FROM DUAL
@@ -82,7 +86,18 @@ BEGIN
 
     -- Confirmar los cambios
     COMMIT;
-END SP_GPE_INSERT_PERSONA_VALIDA;
+END SP_INSERTVALIDPERSON;
+
+
+ALTER PROCEDURE FONAVI_IUD.SP_UPDDEATHDT COMPILE;
+
+SELECT object_name, status FROM all_objects WHERE object_name = 'SP_UPDDEATHDT' AND object_type = 'PROCEDURE';
+
+SELECT * FROM ALL_TAB_COLUMNS
+WHERE TABLE_NAME = 'FON_RENIEC_HIST_F'
+  AND OWNER = 'FONAVI';
+
+
 
 
 

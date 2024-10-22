@@ -124,14 +124,15 @@ END SP_INSERT_H_MASIVO;
 -- Paso 5: Procedimiento para Actualizar Herederos en RENIEC
 -- DROP PROCEDURE FONAVI_IUD.SP_RN_ACTUALIZA_HEREDEROS_RENIEC
 
-CREATE OR REPLACE PROCEDURE FONAVI_IUD.SP_ACT_HERED_RENIEC IS
+CREATE OR REPLACE PROCEDURE FONAVI_IUD.SP_ACT_HERED_RENIEC(
+    p_usuario_modificacion IN VARCHAR2 -- Nuevo parámetro para el usuario logueado
+) IS
     CURSOR cur_padron IS
         SELECT *
         FROM FONAVI_IUD.RRN_ACT_RENIEC
         WHERE IND_PROCESO = 0;
 
     v_fuente_st                VARCHAR2(50) := 'RENIEC - CONSULTA EN LINEA';
-    v_usc_c_usumod             NUMBER(10) := 1089190;
     v_f_usuario_modifica       DATE := SYSDATE;
     v_ip_terminal_modifica     VARCHAR2(40) := SYS_CONTEXT('USERENV', 'IP_ADDRESS');
     n_reg                      NUMBER(10) := 1;
@@ -141,7 +142,7 @@ BEGIN
             SET apellido_paterno = det_padron.HER_D_APELLIDO_PATERNO,
                 apellido_materno = det_padron.HER_D_APELLIDO_MATERNO,
                 nombres = det_padron.HER_D_NOMBRE,
-                usuario_modificacion  = 'ASULCA',
+                usuario_modificacion  = p_usuario_modificacion, -- Usar el parámetro en lugar de un valor fijo
                 fuente_st = v_fuente_st,
                 fecha_modificacion    = v_f_usuario_modifica
             WHERE tipo_documento = det_padron.DOC_C_TIPO
@@ -161,6 +162,7 @@ BEGIN
 
     DBMS_OUTPUT.PUT_LINE('FIN ' || n_reg);
 END SP_ACT_HERED_RENIEC;
+
 
 -- Paso 6: Procedimiento para Actualizar Datos en GPEC Persona
 -- DROP PROCEDURE FONAVI_IUD.SP_GPE_ACTUALIZA_HEREDEROS_PERSONA

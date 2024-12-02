@@ -1,0 +1,469 @@
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------- INSERT PERSONA FON RENIEC --------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+CREATE TABLE FONAVI.DDET_HERED_TMP
+(
+    DOC_C_TIPO VARCHAR2(2),
+    DOC_C_NUMERO  VARCHAR2(10),
+    PER_D_APELLIDO_PATERNO VARCHAR2(50),
+    PER_D_APELLIDO_MATERNO VARCHAR2(50),
+    PER_D_NOMBRES VARCHAR2(100),
+    PER_F_NACIMIENTO DATE
+);
+
+-- Paso 2: Insertar registro en la tabla
+CREATE OR REPLACE PROCEDURE FONAVI.SP_DDE_INSERT_PROC_HERED(
+    p_herederos_str IN VARCHAR2
+) AS
+BEGIN
+    -- Paso 1: Truncar la tabla temporal para eliminar todos los registros
+    EXECUTE IMMEDIATE 'TRUNCATE TABLE FONAVI.DDET_HERED_TMP';
+
+    -- Paso 2: Insertar los nuevos registros en la tabla temporal
+    FOR rec IN (
+        SELECT REGEXP_SUBSTR(p_herederos_str, '[^|]+', 1, LEVEL) AS heredero_str
+        FROM DUAL
+        CONNECT BY LEVEL <= LENGTH(p_herederos_str) - LENGTH(REPLACE(p_herederos_str, '|', '')) + 1
+        ) LOOP
+            INSERT INTO FONAVI.DDET_HERED_TMP (
+                DOC_C_TIPO, DOC_C_NUMERO, PER_D_NOMBRES, PER_D_APELLIDO_PATERNO, PER_D_APELLIDO_MATERNO, PER_F_NACIMIENTO
+            ) VALUES (
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 1),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 2),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 3),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 4),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 5),
+                         TO_DATE(REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 6), 'YYYY-MM-DD')
+                     );
+        END LOOP;
+
+    -- Commit para asegurar que los registros sean insertados
+    COMMIT;
+
+    -- Paso 3: Llamar al procedimiento para comparar e insertar herederos
+    FONAVI.SP_DHE_INSERT_H_MAS(p_herederos_str);
+
+    -- Mensaje de éxito
+    DBMS_OUTPUT.PUT_LINE('Proceso de inserción y comparación completado exitosamente.');
+
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error: ' || SQLERRM);
+        ROLLBACK;
+END SP_DDE_INSERT_PROC_HERED;
+/
+
+-- Paso 3: Insertar masivamente
+CREATE OR REPLACE PROCEDURE FONAVI.SP_DDE_INSERT_HER_MAS IS
+    CURSOR cur_padron IS
+        SELECT *
+        FROM FONAVI.DDET_HERED_TMP;
+    v_fuente_str           VARCHAR2(50) := 'RENIEC - CONSULTA EN LINEA';
+    v_usc_c_usumod         NUMBER(10)   := 1089190;
+    v_f_usuario_modifica   DATE         := SYSDATE;
+    v_ip_terminal_modifica VARCHAR2(40) := SYS_CONTEXT('USERENV', 'IP_ADDRESS');
+    n_reg                  NUMBER(10)   := 1;
+    n_fon                  NUMBER(10);
+    v_pnc_c_persona        FONAVI.GPEC_PERSONA.PNC_C_PERSONA%TYPE;
+    v_estado_restriccion   VARCHAR2(50) := 'SIN RESTRICCION';
+
+BEGIN
+    FOR det_padron IN cur_padron
+        LOOP
+            -- Verificar si existe en FON_RENIEC
+            SELECT COUNT(1)
+            INTO n_fon
+            FROM FONAVI.FON_RENIEC
+            WHERE TIPO_DOCUMENTO = det_padron.DOC_C_TIPO
+              AND NUMERO_DOCUMENTO = det_padron.DOC_C_NUMERO;
+
+            IF n_fon = 0 THEN
+                INSERT INTO FONAVI.FON_RENIEC (TIPO_DOCUMENTO,
+                                               NUMERO_DOCUMENTO,
+                                               APELLIDO_PATERNO,
+                                               APELLIDO_MATERNO,
+                                               NOMBRES,
+                                               FECHA_NACIMIENTO,
+                                               USUARIO_CREACION,
+                                               FECHA_CREACION,
+                                               FUENTE_ST,
+                                               FECHA_VALIDADO_RENIEC,
+                                               ESTADO_RENIEC)
+                VALUES (det_padron.DOC_C_TIPO,
+                        det_padron.DOC_C_NUMERO,
+                        det_padron.PER_D_APELLIDO_PATERNO,
+                        det_padron.PER_D_APELLIDO_MATERNO,
+                        det_padron.PER_D_NOMBRES,
+                        det_padron.PER_F_NACIMIENTO,
+                        v_usc_c_usumod,
+                        v_f_usuario_modifica,
+                        v_fuente_str,
+                        v_f_usuario_modifica,
+                        v_estado_restriccion);
+            ELSE
+                DBMS_OUTPUT.PUT_LINE('REGISTRO FON_RENIEC EXISTE NUMDOC: ' || det_padron.DOC_C_NUMERO);
+            END IF;
+
+            -- Verificar si existe en GPEC_PERSONA
+            SELECT COUNT(1)
+            INTO n_fon
+            FROM FONAVI.GPEC_PERSONA
+            WHERE PDD_C_TIPDOC = det_padron.DOC_C_TIPO
+              AND PNC_N_NRODOC = det_padron.DOC_C_NUMERO;
+
+            IF n_fon = 0 THEN
+                -- Asignar el valor de la secuencia aquí
+                v_pnc_c_persona := FONAVI.SEQ_GPEC_PERSONA_01.NEXTVAL;
+
+                INSERT INTO FONAVI.GPEC_PERSONA (PNC_C_PERSONA,
+                                                 PDD_C_TIPDOC,
+                                                 PNC_N_NRODOC,
+                                                 PNC_D_APEPAT,
+                                                 PNC_D_APEMAT,
+                                                 PNC_D_NOMBRES,
+                                                 PNC_F_NACIMIEN,
+                                                 USC_C_USUCRE,
+                                                 F_USUARIO_CREA,
+                                                 IP_TERMINAL_CREA,
+                                                 PNC_E_VALIDADO_RENIEC,
+                                                 PNC_E_REGISTRO)
+                VALUES (v_pnc_c_persona,
+                        det_padron.DOC_C_TIPO,
+                        det_padron.DOC_C_NUMERO,
+                        det_padron.PER_D_APELLIDO_PATERNO,
+                        det_padron.PER_D_APELLIDO_MATERNO,
+                        det_padron.PER_D_NOMBRES,
+                        det_padron.PER_F_NACIMIENTO,
+                        v_usc_c_usumod,
+                        v_f_usuario_modifica,
+                        v_ip_terminal_modifica,
+                        1,
+                        1);
+            ELSE
+                DBMS_OUTPUT.PUT_LINE('REGISTRO GPEC_PERSONA EXISTE NUMDOC: ' || det_padron.DOC_C_NUMERO);
+            END IF;
+
+            IF MOD(n_reg, 10) = 0 THEN
+                DBMS_OUTPUT.PUT_LINE('REGISTRO: ' || n_reg);
+            END IF;
+
+            n_reg := n_reg + 1;
+
+        END LOOP;
+
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('Proceso completado exitosamente. Total de registros procesados: ' || n_reg);
+
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error: ' || SQLERRM);
+        ROLLBACK;
+END SP_DDE_INSERT_HER_MAS;
+/
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------- ACTUALIZAR FECHA FALLECIDO PERSONA RENIEC ----------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+CREATE OR REPLACE PROCEDURE FONAVI.SP_DHE_UPDATE_DT(
+    p_numero_documento IN VARCHAR2,
+    p_fecha_fallecimiento IN VARCHAR2,
+    p_usuario_sesion IN VARCHAR2
+) AS
+BEGIN
+    --     Procedimiento para Actualizar Fecha de Fallecimiento en FON_RENIEC
+
+    -- Establecer formato de fecha para la sesión
+    EXECUTE IMMEDIATE 'ALTER SESSION SET NLS_DATE_FORMAT = ''DD/MM/YYYY''';
+
+-- Eliminar la restricción de solo lectura (si existe)
+    BEGIN
+        EXECUTE IMMEDIATE 'ALTER TABLE FONAVI.FON_RENIEC DROP CONSTRAINT FON_RENIEC_READ_ONLY';
+    EXCEPTION
+        WHEN OTHERS THEN
+            -- Manejar excepción si la restricción no existe
+            NULL;
+    END;
+
+    -- Comprobación inicial (opcional)
+    DBMS_OUTPUT.PUT_LINE('Comprobación inicial:');
+    FOR r IN (SELECT tipo_documento, numero_documento, estado_reniec, fecha_defuncion, fecha_modificacion
+              FROM FONAVI.FON_RENIEC
+              WHERE numero_documento = p_numero_documento) LOOP
+            DBMS_OUTPUT.PUT_LINE('Tipo Documento: ' || r.tipo_documento);
+            DBMS_OUTPUT.PUT_LINE('Número Documento: ' || r.numero_documento);
+            DBMS_OUTPUT.PUT_LINE('Estado Reniec: ' || r.estado_reniec);
+            DBMS_OUTPUT.PUT_LINE('Fecha Defunción: ' || r.fecha_defuncion);
+            DBMS_OUTPUT.PUT_LINE('Fecha Modificación: ' || r.fecha_modificacion);
+        END LOOP;
+
+    -- Actualización de la fecha de defunción
+    UPDATE FONAVI.FON_RENIEC
+    SET fecha_defuncion = TO_DATE(p_fecha_fallecimiento, 'YYYY-MM-DD'),
+        fecha_validado_reniec = SYSDATE,
+        fecha_modificacion = SYSDATE,
+        estado_reniec = 'FALLECIMIENTO',
+        fuente_st = 'RENIEC - CONSULTA EN LINEA',
+--         usuario_modificacion = 'DBASIFONAVI'
+        usuario_modificacion = p_usuario_sesion
+    WHERE numero_documento = p_numero_documento;
+
+-- Comprobación final (opcional)
+    DBMS_OUTPUT.PUT_LINE('Comprobación final:');
+    FOR r IN (SELECT tipo_documento, numero_documento, estado_reniec, fecha_defuncion, fecha_modificacion
+              FROM FONAVI.FON_RENIEC
+              WHERE numero_documento = p_numero_documento) LOOP
+            DBMS_OUTPUT.PUT_LINE('Tipo Documento: ' || r.tipo_documento);
+            DBMS_OUTPUT.PUT_LINE('Número Documento: ' || r.numero_documento);
+            DBMS_OUTPUT.PUT_LINE('Estado Reniec: ' || r.estado_reniec);
+            DBMS_OUTPUT.PUT_LINE('Fecha Defunción: ' || r.fecha_defuncion);
+            DBMS_OUTPUT.PUT_LINE('Fecha Modificación: ' || r.fecha_modificacion);
+        END LOOP;
+
+    -- Confirmar los cambios
+    COMMIT;
+END SP_DHE_UPDATE_DT;
+
+--2. Procedimiento para Insertar en GPET_PERSONA_VALIDA
+
+CREATE OR REPLACE PROCEDURE FONAVI.SP_DPE_INS_VAL_PER(
+    p_personas_str IN VARCHAR2
+) AS
+BEGIN
+    -- Procedimiento para Insertar en GPET_PERSONA_VALIDA
+
+    -- Eliminar todos los registros de FONAVI.GPET_PERSONA_VALIDA
+    DELETE FROM FONAVI.GPET_PERSONA_VALIDA;
+
+-- Insertar nuevos registros en FONAVI.GPET_PERSONA_VALIDA
+    FOR rec IN (
+        SELECT REGEXP_SUBSTR(p_personas_str, '[^|]+', 1, LEVEL) AS persona_str
+        FROM DUAL
+        CONNECT BY REGEXP_SUBSTR(p_personas_str, '[^|]+', 1, LEVEL) IS NOT NULL
+        ) LOOP
+            INSERT INTO FONAVI.GPET_PERSONA_VALIDA (PNT_C_TIPDOC_RENIEC, PNT_N_NRODOC)
+            VALUES (
+                       REGEXP_SUBSTR(rec.persona_str, '[^,]+', 1, 1),
+                       REGEXP_SUBSTR(rec.persona_str, '[^,]+', 1, 2)
+                   );
+        END LOOP;
+
+    -- Confirmar los cambios
+    COMMIT;
+END SP_DPE_INS_VAL_PER;
+
+
+
+
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------- ACTUALIZAR DATOS FONRENIEC GPECPERSONA --------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Scritp Normalizado ACTUALIZAR DATOS FONRENIEC_GPEC_PERSONA
+
+-- Paso 1: Crear la Tabla Temporal para Insertar Datos
+CREATE TABLE FONAVI.DDET_TMPHEIRS (
+                                     DOC_C_TIPO VARCHAR2(2),
+                                     DOC_C_NUMERO VARCHAR2(10),
+                                     PER_D_NOMBRES VARCHAR2(100),
+                                     PER_D_APELLIDO_PATERNO VARCHAR2(50),
+                                     PER_D_APELLIDO_MATERNO VARCHAR2(50)
+);
+
+--Paso 2: Crear la Tabla para Actualizar Datos de RENIEC
+CREATE TABLE FONAVI.RARC_ACT_RENIEC (
+                                       DOC_C_TIPO VARCHAR2(20),
+                                       DOC_C_NUMERO VARCHAR2(20),
+                                       PER_D_APELLIDO_PATERNO VARCHAR2(50),
+                                       PER_D_APELLIDO_MATERNO VARCHAR2(50),
+                                       PER_D_NOMBRES VARCHAR2(100),
+                                       RENIEC_D_ESTADO VARCHAR2(20),
+                                       HER_D_TIP_DOC VARCHAR2(20),
+                                       HER_C_NUNDOC VARCHAR2(20),
+                                       HER_D_APELLIDO_PATERNO VARCHAR2(50),
+                                       HER_D_APELLIDO_MATERNO VARCHAR2(50),
+                                       HER_D_NOMBRE VARCHAR2(100),
+                                       IND_PROCESO NUMBER(1)
+);
+
+--Paso 3: Crear la Tabla para Actualizar Datos en GPEC Persona
+CREATE TABLE FONAVI.DHEC_HERED_PERSONA(
+                                          DOC_C_TIPO VARCHAR2(20),
+                                          DOC_C_NUMERO VARCHAR2(20),
+                                          PER_D_APELLIDO_PATERNO VARCHAR2(50),
+                                          PER_D_APELLIDO_MATERNO VARCHAR2(50),
+                                          PER_D_NOMBRES VARCHAR2(100),
+                                          GPE_DOC_C_TIPO VARCHAR2(20),
+                                          GPE_DOC_C_NUMERO VARCHAR2(20),
+                                          GPE_PER_D_APELLIDO_PATERNO VARCHAR2(50),
+                                          GPE_PER_D_APELLIDO_MATERNO VARCHAR2(50),
+                                          GPE_PER_D_NOMBRES VARCHAR2(100),
+                                          IND_PROCESO NUMBER(1)
+);
+
+--Paso 4: Procedimiento para Insertar y Comparar Herederos
+CREATE OR REPLACE PROCEDURE FONAVI.SP_DHE_INSERT_H_MAS(
+    p_herederos_str IN VARCHAR2
+) AS
+BEGIN
+    --Procedimiento para Insertar y Comparar Herederos
+    -- Eliminar todos los registros de la tabla temporal antes de insertar nuevos registros
+    DELETE FROM FONAVI.DDET_TMPHEIRS;
+
+    -- Insertar nuevos registros en la tabla temporal
+    FOR rec IN (
+        SELECT REGEXP_SUBSTR(p_herederos_str, '[^|]+', 1, LEVEL) AS heredero_str
+        FROM DUAL
+        CONNECT BY LEVEL <= LENGTH(p_herederos_str) - LENGTH(REPLACE(p_herederos_str, '|', '')) + 1
+        ) LOOP
+            INSERT INTO FONAVI.DDET_TMPHEIRS (
+                DOC_C_TIPO, DOC_C_NUMERO, PER_D_NOMBRES, PER_D_APELLIDO_PATERNO, PER_D_APELLIDO_MATERNO
+            ) VALUES (
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 1),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 2),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 3),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 4),
+                         REGEXP_SUBSTR(rec.heredero_str, '[^,]+', 1, 5)
+                     );
+        END LOOP;
+
+    -- Commit para asegurar que los registros sean insertados
+    COMMIT;
+
+    -- Eliminar registros de la tabla de actualización de RENIEC
+    DELETE FROM FONAVI.RARC_ACT_RENIEC;
+
+    -- Insertar nuevos registros en la tabla de actualización de RENIEC basada en los nuevos registros
+    INSERT INTO FONAVI.RARC_ACT_RENIEC (
+        DOC_C_TIPO, DOC_C_NUMERO, PER_D_APELLIDO_PATERNO, PER_D_APELLIDO_MATERNO, PER_D_NOMBRES,
+        RENIEC_D_ESTADO, HER_D_TIP_DOC, HER_C_NUNDOC, HER_D_APELLIDO_PATERNO,
+        HER_D_APELLIDO_MATERNO, HER_D_NOMBRE, IND_PROCESO
+    )
+    SELECT f.tipo_documento, f.numero_documento, f.apellido_paterno, f.apellido_materno,
+           f.nombres, f.estado_reniec, t.DOC_C_TIPO, t.DOC_C_NUMERO,
+           t.PER_D_APELLIDO_PATERNO, t.PER_D_APELLIDO_MATERNO, t.PER_D_NOMBRES, 0 AS IND_PROCESO
+    FROM FONAVI.DDET_TMPHEIRS t
+             INNER JOIN FONAVI.Fon_Reniec f ON t.DOC_C_NUMERO = f.numero_documento AND f.tipo_documento = t.DOC_C_TIPO
+    WHERE NVL(f.estado_reniec, '*') <> 'CANCELADO'
+      AND (
+        UPPER(NVL(TRIM(t.PER_D_APELLIDO_PATERNO), '*')) <> UPPER(NVL(TRIM(f.apellido_paterno), '*')) OR
+        UPPER(NVL(TRIM(t.PER_D_APELLIDO_MATERNO), '*')) <> UPPER(NVL(TRIM(f.apellido_materno), '*')) OR
+        UPPER(NVL(TRIM(t.PER_D_NOMBRES), '*')) <> UPPER(NVL(TRIM(f.nombres), '*'))
+        );
+
+    -- Commit para asegurar que los registros sean insertados
+    COMMIT;
+
+    -- Eliminar registros de la tabla de actualización en GPEC Persona
+    DELETE FROM FONAVI.DHEC_HERED_PERSONA;
+
+    -- Insertar nuevos registros en la tabla de actualización en GPEC Persona basada en los nuevos registros
+    INSERT INTO FONAVI.DHEC_HERED_PERSONA (
+        DOC_C_TIPO, DOC_C_NUMERO, PER_D_APELLIDO_PATERNO, PER_D_APELLIDO_MATERNO, PER_D_NOMBRES,
+        GPE_DOC_C_TIPO, GPE_DOC_C_NUMERO, GPE_PER_D_APELLIDO_PATERNO, GPE_PER_D_APELLIDO_MATERNO,
+        GPE_PER_D_NOMBRES, IND_PROCESO
+    )
+    SELECT t.DOC_C_TIPO, t.DOC_C_NUMERO, t.PER_D_APELLIDO_PATERNO, t.PER_D_APELLIDO_MATERNO, t.PER_D_NOMBRES,
+           gp.pdd_c_tipdoc, gp.pnc_n_nrodoc, gp.pnc_d_apepat, gp.pnc_d_apemat, gp.pnc_d_nombres, 0 AS IND_PROCESO
+    FROM FONAVI.DDET_TMPHEIRS t
+             INNER JOIN fonavi.gpec_persona gp ON gp.pnc_n_nrodoc = t.DOC_C_NUMERO AND gp.pdd_c_tipdoc = t.DOC_C_TIPO
+    WHERE (
+        UPPER(NVL(TRIM(t.PER_D_APELLIDO_PATERNO), '*')) <> UPPER(NVL(TRIM(gp.pnc_d_apepat), '*')) OR
+        UPPER(NVL(TRIM(t.PER_D_APELLIDO_MATERNO), '*')) <> UPPER(NVL(TRIM(gp.pnc_d_apemat), '*')) OR
+        UPPER(NVL(TRIM(t.PER_D_NOMBRES), '*')) <> UPPER(NVL(TRIM(gp.pnc_d_nombres), '*'))
+        ) AND gp.pnc_e_registro = 1;
+
+    -- Commit final para asegurar que los registros sean insertados correctamente
+    COMMIT;
+END SP_DHE_INSERT_H_MAS;
+
+-- Paso 5: Procedimiento para Actualizar Herederos en RENIEC
+
+CREATE OR REPLACE PROCEDURE FONAVI.SP_DHE_UP_H_RENIEC(
+    p_usuario_modificacion IN VARCHAR2 -- Nuevo parámetro para el usuario logueado
+) IS
+    CURSOR cur_padron IS
+        SELECT *
+        FROM FONAVI.RARC_ACT_RENIEC
+        WHERE IND_PROCESO = 0;
+
+    v_fuente_st                VARCHAR2(50) := 'RENIEC - CONSULTA EN LINEA';
+    v_f_usuario_modifica       DATE := SYSDATE;
+    v_ip_terminal_modifica     VARCHAR2(40) := SYS_CONTEXT('USERENV', 'IP_ADDRESS');
+    n_reg                      NUMBER(10) := 1;
+BEGIN
+    FOR det_padron IN cur_padron LOOP
+            UPDATE fonavi.fon_reniec
+            SET apellido_paterno = det_padron.HER_D_APELLIDO_PATERNO,
+                apellido_materno = det_padron.HER_D_APELLIDO_MATERNO,
+                nombres = det_padron.HER_D_NOMBRE,
+                usuario_modificacion  = p_usuario_modificacion, -- Usar el parámetro en lugar de un valor fijo
+                fuente_st = v_fuente_st,
+                fecha_modificacion    = v_f_usuario_modifica
+            WHERE tipo_documento = det_padron.DOC_C_TIPO
+              AND numero_documento = det_padron.DOC_C_NUMERO;
+
+            UPDATE FONAVI.RARC_ACT_RENIEC
+            SET IND_PROCESO = 1
+            WHERE DOC_C_TIPO = det_padron.DOC_C_TIPO
+              AND DOC_C_NUMERO = det_padron.DOC_C_NUMERO;
+
+            IF MOD(n_reg, 10) = 0 THEN
+                DBMS_OUTPUT.PUT_LINE('REGISTRO ' || n_reg);
+            END IF;
+
+            n_reg := n_reg + 1;
+        END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('FIN ' || n_reg);
+END SP_DHE_UP_H_RENIEC;
+
+
+-- Paso 6: Procedimiento para Actualizar Datos en GPEC Persona
+
+CREATE OR REPLACE PROCEDURE FONAVI.SP_DHE_ACT_HERED_PER IS
+    CURSOR cur_padron IS
+        SELECT *
+        FROM FONAVI.DHEC_HERED_PERSONA
+        WHERE IND_PROCESO = 0;
+
+    v_usc_c_usumod NUMBER(10) := 1089190;
+    v_f_usuario_modifica DATE := SYSDATE;
+    v_ip_terminal_modifica VARCHAR2(40) := SYS_CONTEXT('USERENV', 'IP_ADDRESS');
+    n_reg NUMBER(10) := 1;
+BEGIN
+    FOR det_padron IN cur_padron LOOP
+            UPDATE fonavi.gpec_persona gp
+            SET gp.pnc_d_apepat = det_padron.PER_D_APELLIDO_PATERNO,
+                gp.pnc_d_apemat = det_padron.PER_D_APELLIDO_MATERNO,
+                gp.pnc_d_nombres = det_padron.PER_D_NOMBRES,
+                gp.f_usuario_modifica = v_f_usuario_modifica,
+                gp.ip_terminal_modifica = v_ip_terminal_modifica,
+                gp.usc_c_usumod = v_usc_c_usumod
+            WHERE gp.pdd_c_tipdoc = det_padron.DOC_C_TIPO
+              AND gp.pnc_n_nrodoc = det_padron.DOC_C_NUMERO;
+
+            UPDATE FONAVI.DHEC_HERED_PERSONA
+            SET IND_PROCESO = 1
+            WHERE DOC_C_TIPO = det_padron.DOC_C_TIPO
+              AND DOC_C_NUMERO = det_padron.DOC_C_NUMERO;
+
+            IF MOD(n_reg, 10) = 0 THEN
+                DBMS_OUTPUT.PUT_LINE('REGISTRO ' || n_reg);
+            END IF;
+
+            n_reg := n_reg + 1;
+        END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('FIN ' || n_reg);
+END SP_DHE_ACT_HERED_PER;
+
+
+COMMIT;
+
+
